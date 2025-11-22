@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import AgentDetails from '@/components/AgentDetails'
@@ -15,6 +15,23 @@ export default function Home() {
   const [isCreating, setIsCreating] = useState(false)
   const [checkingAuth, setCheckingAuth] = useState(true)
   const router = useRouter()
+
+  const fetchAgents = useCallback(async () => {
+    try {
+      setLoading(true)
+      const data = await getAgents()
+      setAgents(data)
+      // Auto-select first agent if none selected and not creating
+      if (!selectedAgent && !isCreating && data.length > 0) {
+        setSelectedAgent(data[0])
+      }
+    } catch (error) {
+      toast.error('Failed to fetch agents')
+      console.error('Error fetching agents:', error)
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedAgent, isCreating])
 
   useEffect(() => {
     // Check authentication first
@@ -36,24 +53,7 @@ export default function Home() {
       fetchAgents()
     }
     checkAuth()
-  }, [router])
-
-  const fetchAgents = async () => {
-    try {
-      setLoading(true)
-      const data = await getAgents()
-      setAgents(data)
-      // Auto-select first agent if none selected and not creating
-      if (!selectedAgent && !isCreating && data.length > 0) {
-        setSelectedAgent(data[0])
-      }
-    } catch (error) {
-      toast.error('Failed to fetch agents')
-      console.error('Error fetching agents:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+  }, [router, fetchAgents])
 
   const handleSelectAgent = (agent: Agent) => {
     setSelectedAgent(agent)

@@ -63,7 +63,7 @@ export default function Sidebar({
         ) : agents.length === 0 ? (
           <div className="p-4 text-center text-gray-400 text-sm">
             <p>No agents yet</p>
-            <p className="mt-2">Click "New Bot" to create one</p>
+            <p className="mt-2">Click &quot;New Bot&quot; to create one</p>
           </div>
         ) : (
           <div className="p-2">
