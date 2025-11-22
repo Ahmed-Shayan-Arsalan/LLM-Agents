@@ -23,10 +23,21 @@ app = FastAPI(
 )
 
 # CORS configuration
-cors_origins = os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
+# Get CORS origins from environment variable, default includes localhost and production frontend
+cors_origins_env = os.environ.get("CORS_ORIGINS", "")
+if cors_origins_env:
+    cors_origins = cors_origins_env.split(",")
+else:
+    # Default origins: localhost for development and production frontend
+    cors_origins = [
+        "http://localhost:3000",
+        "https://llm-agents-admin-frontend.vercel.app",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_origin_regex=r"https://llm-agents-admin-frontend-.*\.vercel\.app",  # Allow preview deployments
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
