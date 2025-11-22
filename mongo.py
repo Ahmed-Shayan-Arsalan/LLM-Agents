@@ -28,26 +28,26 @@ motie_checker = {
     "name": "MotieChecker",
     "api_key": os.environ.get("MOTIECHECKER_OPENAI_KEY", "sk-XXXXXXXXXXXXXXXXXXXXXXXXXXXX"),
     "system_prompt": (
-        "You are a political analyst specializing in Dutch parliamentary voting behavior. "
-        "Your job is to help young people understand how political parties vote on key issues "
-        "like housing, climate, and education. Summarize votes in clear language, explain what "
-        "they mean for young people, and list which parties voted for or against — without "
-        "using technical jargon."
+            "You are a political analyst specializing in Dutch parliamentary voting behavior. "
+            "Your job is to help young people understand how political parties vote on key issues "
+            "like housing, climate, and education. Summarize votes in clear language, explain what "
+            "they mean for young people, and list which parties voted for or against — without "
+            "using technical jargon."
     ),
-    "endpoint": "https://api.tweedekamer.nl/open_data",
+        "endpoint": "https://api.tweedekamer.nl/open_data",
     "endpoint_info": "Tweede Kamer Open Data API - Provides access to Dutch parliamentary voting data and motions",
     "example_query": {
-        "type": "stemming",
-        "query": {
-            "bool": {
-                "must": [
-                    {"match": {"omschrijving": "studenten"}},
-                    {"range": {"datum": {"gte": "2023-01-01", "lte": "2023-12-31"}}},
-                ]
-            }
+            "type": "stemming",
+            "query": {
+                "bool": {
+                    "must": [
+                        {"match": {"omschrijving": "studenten"}},
+                        {"range": {"datum": {"gte": "2023-01-01", "lte": "2023-12-31"}}},
+                    ]
+                }
+            },
+            "size": 1,
         },
-        "size": 1,
-    },
     "test_scenarios": (
         "User prompt: 'What did parties vote on student housing last year?'\n\n"
         "Expected AI response:\n"
@@ -57,7 +57,7 @@ motie_checker = {
         "This shows that left-leaning parties pushed for more housing support for students, "
         "while right-wing parties were more hesitant to allocate extra funds."
     ),
-    "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(timezone.utc),
 }
 
 def upsert_agent(agent_data):
@@ -77,11 +77,11 @@ def upsert_agent(agent_data):
     Returns:
         Result object from MongoDB update_one operation
     """
-    result = collection.update_one(
+result = collection.update_one(
         {"name": agent_data["name"]},
         {"$set": agent_data},
         upsert=True
-    )
+)
     return result
 
 
@@ -94,10 +94,10 @@ def main():
         
         # Upsert MotieChecker agent
         result = upsert_agent(motie_checker)
-        
-        if result.upserted_id:
+
+if result.upserted_id:
             print(f"✓ Inserted new agent '{motie_checker['name']}' with _id={result.upserted_id}")
-        else:
+else:
             print(f"✓ Updated existing agent '{motie_checker['name']}'")
             
         # Add more agents here as needed

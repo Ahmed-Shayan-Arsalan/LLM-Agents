@@ -7,7 +7,9 @@ import toast from 'react-hot-toast'
 
 interface ChatInterfaceProps {
   agent: Agent
+  agents: Agent[]
   onBack: () => void
+  onSwitchAgent: (agent: Agent) => void
 }
 
 interface Message {
@@ -16,10 +18,11 @@ interface Message {
   timestamp: Date
 }
 
-export default function ChatInterface({ agent, onBack }: ChatInterfaceProps) {
+export default function ChatInterface({ agent, agents, onBack, onSwitchAgent }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showAgentDropdown, setShowAgentDropdown] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -29,6 +32,20 @@ export default function ChatInterface({ agent, onBack }: ChatInterfaceProps) {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (showAgentDropdown && !target.closest('.agent-dropdown-container')) {
+        setShowAgentDropdown(false)
+      }
+    }
+
+    if (showAgentDropdown) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showAgentDropdown])
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -41,13 +58,14 @@ export default function ChatInterface({ agent, onBack }: ChatInterfaceProps) {
     }
 
     setMessages((prev) => [...prev, userMessage])
+    const userQuery = input.trim()
     setInput('')
     setLoading(true)
 
     try {
       const response = await completeQuery({
         agent_name: agent.name,
-        user_query: input.trim(),
+        user_query: userQuery,
       })
 
       const assistantMessage: Message = {
@@ -66,7 +84,7 @@ export default function ChatInterface({ agent, onBack }: ChatInterfaceProps) {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-[#343541] text-gray-100">
+    <div className="flex h-screen flex-col bg-[#343541] text-gray-100 animate-fadeIn">
       {/* Header */}
       <div className="px-8 py-5 border-b border-gray-700/50">
         <div className="flex items-center justify-between max-w-4xl mx-auto">
@@ -79,10 +97,37 @@ export default function ChatInterface({ agent, onBack }: ChatInterfaceProps) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
             </button>
-            <div>
-              <h1 className="text-2xl font-semibold text-white">{agent.name}</h1>
-              <p className="text-sm text-gray-400">AI Assistant</p>
+            <div className="relative agent-dropdown-container">
+              <button
+                onClick={() => setShowAgentDropdown(!showAgentDropdown)}
+                className="flex items-center gap-2 px-4 py-2 bg-[#40414f] hover:bg-[#4a4b5a] rounded-lg transition-colors"
+              >
+                <span className="text-xl font-semibold text-white">{agent.name}</span>
+                <svg className={`w-4 h-4 text-gray-400 transition-transform ${showAgentDropdown ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              
+              {showAgentDropdown && (
+                <div className="absolute top-full left-0 mt-2 bg-[#40414f] border border-gray-600 rounded-lg shadow-lg z-50 min-w-[200px] animate-slideDown">
+                  {agents.map((a) => (
+                    <button
+                      key={a._id}
+                      onClick={() => {
+                        onSwitchAgent(a)
+                        setShowAgentDropdown(false)
+                      }}
+                      className={`w-full text-left px-4 py-2 hover:bg-[#4a4b5a] transition-colors first:rounded-t-lg last:rounded-b-lg ${
+                        a._id === agent._id ? 'bg-[#10a37f]/20 text-[#10a37f]' : 'text-white'
+                      }`}
+                    >
+                      {a.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
+            <p className="text-sm text-gray-400">AI Assistant</p>
           </div>
         </div>
       </div>
@@ -91,9 +136,9 @@ export default function ChatInterface({ agent, onBack }: ChatInterfaceProps) {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-8 py-6">
           {messages.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
+            <div className="flex items-center justify-center h-full animate-fadeIn">
               <div className="text-center">
-                <div className="text-6xl mb-4">🤖</div>
+                <div className="text-6xl mb-4 animate-bounce">🤖</div>
                 <h2 className="text-2xl font-semibold text-gray-300 mb-2">
                   Start a conversation with {agent.name}
                 </h2>
@@ -107,7 +152,7 @@ export default function ChatInterface({ agent, onBack }: ChatInterfaceProps) {
               {messages.map((message, index) => (
                 <div
                   key={index}
-                  className={`flex gap-4 ${
+                  className={`flex gap-4 animate-slideIn ${
                     message.role === 'user' ? 'justify-end' : 'justify-start'
                   }`}
                 >
@@ -133,7 +178,7 @@ export default function ChatInterface({ agent, onBack }: ChatInterfaceProps) {
                 </div>
               ))}
               {loading && (
-                <div className="flex gap-4 justify-start">
+                <div className="flex gap-4 justify-start animate-fadeIn">
                   <div className="w-8 h-8 bg-[#10a37f] rounded-full flex items-center justify-center flex-shrink-0">
                     🤖
                   </div>

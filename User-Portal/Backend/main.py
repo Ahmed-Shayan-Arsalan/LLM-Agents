@@ -155,19 +155,42 @@ async def complete_query(request: QueryGenerationRequest):
     Complete workflow: Generate query -> Execute API -> Get OpenAI response
     This is a convenience endpoint that combines all steps
     """
+    import logging
+    from datetime import datetime
+    
+    logger = logging.getLogger(__name__)
+    
+    logger.info("=" * 80)
+    logger.info("=" * 80)
+    logger.info(f"COMPLETE QUERY WORKFLOW STARTED")
+    logger.info(f"Agent: {request.agent_name}")
+    logger.info(f"User Query: {request.user_query}")
+    logger.info(f"Timestamp: {datetime.now().isoformat()}")
+    logger.info("=" * 80)
+    logger.info("=" * 80)
+    
     try:
         # Step 1: Generate query
+        logger.info("\n>>> STEP 1: QUERY GENERATION <<<\n")
         generated_query = generate_query(request.agent_name, request.user_query)
         
         # Step 2: Execute API query
+        logger.info("\n>>> STEP 2: API EXECUTION <<<\n")
         api_results = await execute_query(request.agent_name, generated_query)
         
         # Step 3: Generate final response
+        logger.info("\n>>> STEP 3: FINAL RESPONSE GENERATION <<<\n")
         final_response = generate_final_response(
             request.agent_name,
             request.user_query,
             api_results
         )
+        
+        logger.info("=" * 80)
+        logger.info("=" * 80)
+        logger.info("WORKFLOW COMPLETED SUCCESSFULLY")
+        logger.info("=" * 80)
+        logger.info("=" * 80)
         
         return {
             "response": final_response,
@@ -176,11 +199,13 @@ async def complete_query(request: QueryGenerationRequest):
             "success": True
         }
     except ValueError as e:
+        logger.error(f"ValueError: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
     except Exception as e:
+        logger.error(f"Exception in complete_query: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing query: {str(e)}"
