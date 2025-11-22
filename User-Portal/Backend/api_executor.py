@@ -54,63 +54,74 @@ async def execute_query(agent_name: str, query: Dict[str, Any]) -> Dict[str, Any
     logger.info("-" * 80)
     
     # Detect endpoint type based on URL and query structure
-    is_odata = "/OData/" in endpoint or endpoint.endswith("/OData/v4/2.0") or endpoint.endswith("/OData/v4/2.0/")
+    # OData detection: look for /OData/ or /odata/ (case-insensitive)
+    is_odata = "/odata/" in endpoint.lower()
     has_odata_structure = "entity_set" in query or "$filter" in str(query) or "filter" in query
     
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            # Try OData format if detected
+            # ALWAYS use GET requests - convert query to URL parameters
+            # OData has special handling for $ parameters
             if is_odata or has_odata_structure:
                 try:
                     logger.info("Attempting OData-style GET request")
                     
                     # Build OData query URL
-                    entity_set = query.get("entity_set", query.get("type", "Stemming"))
+                    # Get entity_set from query, or use 'type' field as fallback
+                    entity_set = query.get("entity_set") or query.get("type")
+                    
+                    if not entity_set:
+                        raise ValueError("OData query must include 'entity_set' or 'type' field to specify the entity to query")
+                    
+                    # Normalize endpoint URL - remove trailing slashes
                     base_url = endpoint.rstrip("/")
                     
-                    # Normalize OData base URL
-                    if "/OData/" in base_url:
-                        if not base_url.endswith("/OData/v4/2.0"):
-                            if base_url.endswith("/OData/v4/2.0/"):
-                                base_url = base_url.rstrip("/")
-                            elif "/OData/v4/2.0/" in base_url:
-                                base_url = base_url.split("/OData/v4/2.0/")[0] + "/OData/v4/2.0"
-                            elif "/OData/" in base_url:
-                                # Extract base up to /OData/ and add /v4/2.0
-                                parts = base_url.split("/OData/")
-                                base_url = parts[0] + "/OData/v4/2.0"
-                    
-                    # Build OData query parameters
-                    # OData uses $ prefix which should NOT be encoded
-                    # Build URL using httpx.URL to properly handle OData $ parameters
+                    # Build OData query URL with entity set
                     entity_url = f"{base_url}/{entity_set}"
                     
-                    # Build query parameters dict - httpx will encode values but we need to preserve $ in keys
-                    # So we'll build the query string manually
+                    # Build OData query parameters
+                    # OData uses $ prefix which should NOT be encoded in the parameter names
+                    # We'll build the query string manually to preserve $ signs
                     odata_parts = []
+                    
+                    # Handle $filter parameter
                     if "filter" in query:
-                        # Encode the filter value properly for OData
-                        # OData filter syntax: contains(Omschrijving,'studentenhuisvesting') and Datum ge 2022-01-01
-                        # We need to encode spaces and special chars but preserve OData operators
                         filter_value = query['filter']
                         # Encode the filter value - preserve OData operators and syntax
-                        # OData operators: and, or, ge, le, gt, lt, eq, ne, contains, startswith, endswith
+                        # OData operators: and, or, not, ge, le, gt, lt, eq, ne, contains, startswith, endswith
                         # Keep parentheses, quotes, commas, and operators unencoded
-                        # Spaces need to be encoded as %20
+                        # Spaces and special characters will be encoded
                         filter_value = quote(filter_value, safe="'(),andorgelegtlteqnecontainsstartswithendswith")
                         odata_parts.append(f"$filter={filter_value}")
+                    
+                    # Handle $top parameter (limit results)
                     if "top" in query:
                         odata_parts.append(f"$top={query['top']}")
-                    elif "size" in query:
+                    elif "size" in query:  # Allow 'size' as alias for $top
                         odata_parts.append(f"$top={query['size']}")
+                    
+                    # Handle $skip parameter (pagination)
+                    if "skip" in query:
+                        odata_parts.append(f"$skip={query['skip']}")
+                    elif "from" in query:  # Allow 'from' as alias for $skip
+                        odata_parts.append(f"$skip={query['from']}")
+                    
+                    # Handle $select parameter (field selection)
                     if "select" in query:
                         # Select fields - encode but preserve commas
                         select_value = quote(query['select'], safe=",")
                         odata_parts.append(f"$select={select_value}")
+                    
+                    # Handle $orderby parameter (sorting)
                     if "orderby" in query:
-                        # Orderby - encode but preserve spaces
-                        orderby_value = quote(query['orderby'], safe=" ")
+                        # Orderby - encode but preserve spaces and desc/asc keywords
+                        orderby_value = quote(query['orderby'], safe=" ,desasc")
                         odata_parts.append(f"$orderby={orderby_value}")
+                    
+                    # Handle $expand parameter (related entities)
+                    if "expand" in query:
+                        expand_value = quote(query['expand'], safe=",/")
+                        odata_parts.append(f"$expand={expand_value}")
                     
                     # Build full URL - manually construct to preserve $ in parameter names
                     if odata_parts:
@@ -152,44 +163,79 @@ async def execute_query(agent_name: str, query: Dict[str, Any]) -> Dict[str, Any
                         logger.info("=" * 80)
                         return api_results
                     elif response.status_code == 400:
-                        # 400 Bad Request - likely URL encoding issue, log error details
+                        # 400 Bad Request - query format issue
                         error_text = response.text[:500] if hasattr(response, 'text') else "No error details"
                         logger.error(f"OData GET returned 400 Bad Request")
                         logger.error(f"Error details: {error_text}")
                         logger.error(f"Attempted URL: {full_url}")
-                        # Don't fallback - 400 means the request format is wrong
-                        raise Exception(f"OData API returned 400 Bad Request. Check query format. Error: {error_text}")
+                        # Don't fallback for 400 - it means the query format is wrong
+                        raise Exception(f"OData API returned 400 Bad Request. The query format may be incorrect. Error: {error_text}")
+                    elif response.status_code == 404:
+                        # 404 Not Found - entity set or endpoint doesn't exist
+                        error_text = response.text[:500] if hasattr(response, 'text') else "No error details"
+                        logger.error(f"OData GET returned 404 Not Found")
+                        logger.error(f"Error details: {error_text}")
+                        logger.error(f"Attempted URL: {full_url}")
+                        raise Exception(f"OData endpoint or entity set not found (404). Check entity_set name. Error: {error_text}")
                     else:
-                        # If GET failed with other status, fall through to try POST
-                        logger.warning(f"OData GET returned status {response.status_code}, trying POST fallback...")
-                        raise httpx.HTTPStatusError("Trying POST fallback", request=response.request, response=response)
+                        # Other status codes - raise error (no fallback)
+                        error_text = response.text[:500] if hasattr(response, 'text') else "No error details"
+                        logger.error(f"OData GET returned status {response.status_code}")
+                        logger.error(f"Error details: {error_text}")
+                        raise Exception(f"OData API returned status {response.status_code}. Error: {error_text}")
                         
+                except ValueError as e:
+                    # Re-raise ValueError (missing entity_set)
+                    logger.error(f"OData query configuration error: {str(e)}")
+                    raise
                 except httpx.HTTPStatusError as e:
-                    # Only fallback to POST if it's a 405, not for 400 errors
-                    if e.response.status_code == 405:
-                        logger.info("OData GET returned 405, falling back to POST method")
-                    elif e.response.status_code == 400:
-                        # Re-raise 400 errors - they indicate format issues
-                        raise
-                    else:
-                        logger.warning(f"OData GET failed with status {e.response.status_code}, trying POST fallback...")
-                    # Fall through to POST attempt only for 405
-                    if e.response.status_code != 405:
-                        raise
+                    # Handle HTTP errors - no fallback, just raise
+                    error_text = e.response.text[:500] if hasattr(e.response, 'text') else "No error details"
+                    logger.error(f"OData GET HTTP error: Status {e.response.status_code}")
+                    logger.error(f"Error details: {error_text}")
+                    raise Exception(f"OData API request failed with status {e.response.status_code}. Error: {error_text}")
                 except httpx.RequestError as e:
-                    logger.warning(f"OData GET request error: {str(e)}, trying POST fallback...")
-                    # Fall through to POST attempt
+                    # Network/connection errors - raise without fallback
+                    logger.error(f"OData GET request error: {str(e)}")
+                    raise Exception(f"OData API connection error: {str(e)}")
             
-            # Standard API - use POST with JSON body (default or fallback)
-            logger.info("Using POST request with JSON body")
+            # ALWAYS use GET requests - convert query to URL parameters
+            logger.info("Using GET request with URL parameters (standard REST API)")
             logger.info(f"Request URL: {endpoint}")
-            logger.info(f"Request Method: POST")
+            logger.info(f"Request Method: GET")
             
-            response = await client.post(
-                endpoint,
-                json=query,
+            # Convert query dict to URL parameters
+            get_url = endpoint
+            if query:
+                params = []
+                for key, value in query.items():
+                    if isinstance(value, (str, int, float, bool)):
+                        # Simple values - URL encode
+                        params.append(f"{key}={quote(str(value))}")
+                    elif isinstance(value, dict):
+                        # Nested dicts - JSON encode and URL encode
+                        params.append(f"{key}={quote(json.dumps(value))}")
+                    elif isinstance(value, list):
+                        # Arrays - repeat parameter for each item
+                        for item in value:
+                            if isinstance(item, (str, int, float, bool)):
+                                params.append(f"{key}={quote(str(item))}")
+                            else:
+                                params.append(f"{key}={quote(json.dumps(item))}")
+                    elif value is None:
+                        # Skip None values
+                        continue
+                
+                if params:
+                    query_string = "&".join(params)
+                    get_url = f"{endpoint}?{query_string}"
+                    logger.info(f"Query Parameters: {query_string[:200]}...")
+            
+            logger.info(f"Full Request URL: {get_url}")
+            
+            response = await client.get(
+                get_url,
                 headers={
-                    "Content-Type": "application/json",
                     "Accept": "application/json",
                     "User-Agent": "LLM-Agents/1.0"
                 }
@@ -197,32 +243,6 @@ async def execute_query(agent_name: str, query: Dict[str, Any]) -> Dict[str, Any
             
             logger.info(f"API Response Status: {response.status_code}")
             logger.info(f"Response Headers: {dict(response.headers)}")
-            
-            # If POST also fails with 405, try GET as last resort (only for non-OData)
-            if response.status_code == 405 and not (is_odata or has_odata_structure):
-                logger.warning("POST returned 405 Method Not Allowed, trying GET as fallback...")
-                # Try GET with query as URL parameters
-                get_url = endpoint
-                if query:
-                    # Convert query dict to URL parameters
-                    params = []
-                    for key, value in query.items():
-                        if isinstance(value, (str, int, float, bool)):
-                            params.append(f"{key}={quote(str(value))}")
-                        elif isinstance(value, dict):
-                            params.append(f"{key}={quote(json.dumps(value))}")
-                    if params:
-                        get_url = f"{endpoint}?{'&'.join(params)}"
-                
-                logger.info(f"Fallback GET URL: {get_url}")
-                response = await client.get(
-                    get_url,
-                    headers={
-                        "Accept": "application/json",
-                        "User-Agent": "LLM-Agents/1.0"
-                    }
-                )
-                logger.info(f"Fallback GET Response Status: {response.status_code}")
             
             response.raise_for_status()
             api_results = response.json()

@@ -1,9 +1,17 @@
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import List, Optional
 from datetime import datetime, timezone
 from bson import ObjectId
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+from pydantic import BaseModel
+
+# Load environment variables from .env file in the same directory as this script
+env_path = Path(__file__).parent / '.env'
+load_dotenv(dotenv_path=env_path)
 
 from database import collection
 from models import Agent, AgentCreate, AgentUpdate
@@ -24,6 +32,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Password authentication
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+if not ADMIN_PASSWORD:
+    raise ValueError("ADMIN_PASSWORD environment variable is required. Please set it in .env file.")
+security = HTTPBearer()
+
+# Authentication models
+class LoginRequest(BaseModel):
+    password: str
+
+class LoginResponse(BaseModel):
+    success: bool
+    message: str
+    token: Optional[str] = None
+
+# Simple token (in production, use JWT)
+VALID_TOKEN = "admin_authenticated_token"
+
+def verify_password(password: str) -> bool:
+    """Verify the admin password"""
+    return password == ADMIN_PASSWORD
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> bool:
+    """Verify the authentication token"""
+    return credentials.credentials == VALID_TOKEN
+
 
 def agent_helper(agent) -> dict:
     """Convert MongoDB document to dict with string _id"""
@@ -37,9 +71,29 @@ def agent_helper(agent) -> dict:
 async def root():
     return {"message": "LLM Agents Admin API", "version": "1.0.0"}
 
+@app.post("/api/auth/login", response_model=LoginResponse)
+async def login(login_request: LoginRequest):
+    """Login endpoint to authenticate admin"""
+    if verify_password(login_request.password):
+        return LoginResponse(
+            success=True,
+            message="Authentication successful",
+            token=VALID_TOKEN
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid password"
+        )
+
+@app.get("/api/auth/verify")
+async def verify_auth(is_authenticated: bool = Depends(verify_token)):
+    """Verify if user is authenticated"""
+    return {"authenticated": True}
+
 
 @app.get("/api/agents", response_model=List[Agent], status_code=status.HTTP_200_OK)
-async def get_all_agents():
+async def get_all_agents(is_authenticated: bool = Depends(verify_token)):
     """Get all agents from the database"""
     try:
         agents = []
@@ -54,7 +108,7 @@ async def get_all_agents():
 
 
 @app.get("/api/agents/{agent_id}", response_model=Agent, status_code=status.HTTP_200_OK)
-async def get_agent(agent_id: str):
+async def get_agent(agent_id: str, is_authenticated: bool = Depends(verify_token)):
     """Get a single agent by ID"""
     try:
         if not ObjectId.is_valid(agent_id):
@@ -81,7 +135,7 @@ async def get_agent(agent_id: str):
 
 
 @app.get("/api/agents/name/{agent_name}", response_model=Agent, status_code=status.HTTP_200_OK)
-async def get_agent_by_name(agent_name: str):
+async def get_agent_by_name(agent_name: str, is_authenticated: bool = Depends(verify_token)):
     """Get a single agent by name"""
     try:
         agent = collection.find_one({"name": agent_name})
@@ -102,7 +156,7 @@ async def get_agent_by_name(agent_name: str):
 
 
 @app.post("/api/agents", response_model=Agent, status_code=status.HTTP_201_CREATED)
-async def create_agent(agent: AgentCreate):
+async def create_agent(agent: AgentCreate, is_authenticated: bool = Depends(verify_token)):
     """Create a new agent"""
     try:
         # Check if agent with same name already exists
@@ -133,7 +187,7 @@ async def create_agent(agent: AgentCreate):
 
 
 @app.put("/api/agents/{agent_id}", response_model=Agent, status_code=status.HTTP_200_OK)
-async def update_agent(agent_id: str, agent_update: AgentUpdate):
+async def update_agent(agent_id: str, agent_update: AgentUpdate, is_authenticated: bool = Depends(verify_token)):
     """Update an existing agent"""
     try:
         if not ObjectId.is_valid(agent_id):
@@ -187,7 +241,7 @@ async def update_agent(agent_id: str, agent_update: AgentUpdate):
 
 
 @app.delete("/api/agents/{agent_id}", status_code=status.HTTP_200_OK)
-async def delete_agent(agent_id: str):
+async def delete_agent(agent_id: str, is_authenticated: bool = Depends(verify_token)):
     """Delete an agent"""
     try:
         if not ObjectId.is_valid(agent_id):

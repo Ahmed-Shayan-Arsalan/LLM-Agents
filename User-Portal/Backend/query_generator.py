@@ -61,42 +61,81 @@ def generate_query(agent_name: str, user_query: str) -> Dict[str, Any]:
     # Initialize OpenAI client with agent's API key
     client = OpenAI(api_key=agent["api_key"])
     
-    # Build OData-specific context if this is an OData endpoint
-    odata_context = ""
+    # Build API-specific context based on endpoint type
+    api_context = ""
     if is_odata:
-        odata_context = """
-IMPORTANT OData API Information:
-- This is an OData v4 API at: https://gegevensmagazijn.tweedekamer.nl/OData/v4/2.0/
-- Available entity sets include: Stemming (voting records), Besluit (decisions), Zaak (cases), Vergadering (meetings), etc.
+        api_context = """
+IMPORTANT: This is an OData API endpoint.
 
-EXACT FIELD DEFINITIONS:
-- Stemming entity fields: Id, Besluit_Id, Soort, FractieGrootte, ActorNaam, ActorFractie, Vergissing, SidActorLid, SidActorFractie, Persoon_Id, Fractie_Id, GewijzigdOp, ApiGewijzigdOp, Verwijderd
-  * NO "Datum" field exists on Stemming
-  * NO "Omschrijving" field exists on Stemming
-  
-- Besluit entity fields: Id, Agendapunt_Id, StemmingsSoort, BesluitSoort, BesluitTekst (description text), Opmerking, Status, AgendapuntZaakBesluitVolgorde, GewijzigdOp, ApiGewijzigdOp, Verwijderd
-  * NO "Datum" field exists on Besluit
-  * Use "GewijzigdOp" or "ApiGewijzigdOp" for date filtering on Besluit
-  * BesluitTekst contains the description/text content
+OData Query Structure:
+- OData queries use entity sets (like database tables) accessed via GET requests
+- Query parameters use $ prefix: $filter, $top, $select, $orderby, $expand
+- Entity set names are usually case-sensitive
 
-DATE FILTERING:
-- For Besluit entity: Use GewijzigdOp or ApiGewijzigdOp (datetime fields)
-  Example: ApiGewijzigdOp ge 2022-01-01T00:00:00Z and ApiGewijzigdOp le 2022-12-31T23:59:59Z
-- For Stemming entity: Use GewijzigdOp or ApiGewijzigdOp (datetime fields)
-  Example: ApiGewijzigdOp ge 2022-01-01T00:00:00Z
+Common OData Query Format:
+{
+  "entity_set": "EntityName",
+  "filter": "FieldName eq 'value' or contains(TextField,'keyword')",
+  "top": 10,
+  "select": "Field1,Field2,Field3"
+}
 
-QUERY STRATEGY:
-- To search voting records by description: Query Besluit entity with BesluitTekst field
-- To filter by date: Use GewijzigdOp or ApiGewijzigdOp (NOT "Datum")
-- To get voting details: Query Stemming entity and join with Besluit via Besluit_Id
+OData $filter Operators:
+- Logical: and, or, not
+- Comparison: eq (equal), ne (not equal), gt (greater), ge (greater or equal), lt (less), le (less or equal)
+- String functions: contains(field,'text'), startswith(field,'text'), endswith(field,'text')
+- Date comparison: use ISO 8601 format (e.g., 2023-01-01T00:00:00Z)
+- Example: FieldName ge 2023-01-01T00:00:00Z and FieldName le 2023-12-31T23:59:59Z
 
-OData $filter syntax examples:
-  * contains(BesluitTekst,'studenten') - search in BesluitTekst field
-  * ActorFractie eq 'VVD' - exact match (on Stemming entity)
-  * ApiGewijzigdOp ge 2022-01-01T00:00:00Z - date filtering (use ISO 8601 format)
-  * and/or operators for combining conditions
+CRITICAL INSTRUCTIONS FOR OData:
+1. Use ONLY the field names shown in the example query - do NOT invent field names
+2. Entity set names from the example query are the correct ones to use
+3. Date/time fields should use ISO 8601 format with timezone (e.g., 2023-01-01T00:00:00Z)
+4. String values in filters use single quotes: 'value'
+5. Field names in OData are case-sensitive - match the example query exactly
+6. If the example query shows specific field names for dates or descriptions, use those exact names
+"""
+    elif has_elasticsearch_structure:
+        api_context = """
+IMPORTANT: This is an Elasticsearch-style API endpoint.
 
-CRITICAL: Do NOT use "Datum" field - it does not exist. Use "GewijzigdOp" or "ApiGewijzigdOp" instead.
+Elasticsearch Query Structure:
+- Uses POST requests with JSON body
+- Query structure typically includes: query, size, from, sort
+- Supports complex boolean queries with must, should, must_not
+
+Common Elasticsearch Query Format:
+{
+  "query": {
+    "bool": {
+      "must": [
+        {"match": {"field": "value"}},
+        {"range": {"date_field": {"gte": "2023-01-01", "lte": "2023-12-31"}}}
+      ]
+    }
+  },
+  "size": 10
+}
+
+CRITICAL INSTRUCTIONS FOR Elasticsearch:
+1. Use ONLY the field names and query structure shown in the example query
+2. Match the nesting structure of the example query exactly
+3. Date formats should match the example query format
+"""
+    else:
+        api_context = """
+IMPORTANT: This is a REST API endpoint.
+
+REST API Query Structure:
+- The example query shows the EXACT structure this API expects
+- Some APIs use POST with JSON body, others use GET with URL parameters
+- Field names, nesting, and data types must match the example query
+
+CRITICAL INSTRUCTIONS:
+1. Use ONLY the field names shown in the example query
+2. Match the structure and nesting of the example query EXACTLY
+3. Adapt only the values to match what the user is asking for
+4. Do not add or remove fields unless the user explicitly requests data not covered by the example
 """
     
     # Build the prompt for query generation - adapt based on example query structure
@@ -108,29 +147,26 @@ Agent Context:
 - Endpoint URL: {endpoint}
 - Example Query: {json.dumps(example_query, indent=2)}
 - Test Scenarios: {agent['test_scenarios']}
-{odata_context}
+{api_context}
 CRITICAL INSTRUCTIONS:
-1. Analyze the example query structure carefully - it shows the EXACT format this API expects
-2. Generate a query that matches the example query structure EXACTLY
-3. Adapt the parameters/values to match what the user is asking for
-4. If this is an OData endpoint (contains /OData/), generate OData-style queries with correct field names
-5. If the example uses "entity_set" and "filter", generate OData-style queries
-6. If the example uses "query" with nested objects, generate Elasticsearch-style queries
-7. If the example uses a different structure, match that structure exactly
-8. Return ONLY valid JSON that matches the example query format
-9. Do not include any explanations, comments, or markdown formatting - just the raw JSON
-10. IMPORTANT: Use only fields that actually exist in the OData entity (see OData API Information above)
+1. The example query is your PRIMARY reference - it shows the EXACT format, field names, and structure this API expects
+2. Analyze the example query structure carefully and match it EXACTLY
+3. Use ONLY field names that appear in the example query - never invent or guess field names
+4. Maintain the same JSON structure, nesting, and data types as the example
+5. Adapt ONLY the values to match what the user is asking for
+6. Return ONLY valid JSON that matches the example query format
+7. Do not include any explanations, comments, or markdown formatting - just the raw JSON
 
 Your task:
-1. Analyze the user's query
-2. Look at the example query structure - this is the format you MUST follow
-3. If this is an OData endpoint, use the correct entity set and field names from the OData API Information
-4. Generate an appropriate API query structure that matches the example format
-5. Adapt the query parameters to match what the user is asking for
-6. Ensure the structure matches the example query exactly (same keys, same nesting)
-7. For text searches on voting records, use Besluit entity with BesluitTekst field, or join via Besluit_Id
+1. Study the example query structure - this is your template
+2. Identify what the user is asking for
+3. Map the user's request to the fields and structure shown in the example query
+4. Generate a query that uses the SAME field names and structure as the example
+5. If a field exists in the example for dates, use that field for date filtering
+6. If a field exists in the example for text search, use that field for text matching
+7. If the user asks for something not covered by the example query fields, do your best to adapt the closest matching field
 
-The query should be structured to retrieve data that will help answer the user's question."""
+The query should retrieve data that helps answer the user's question while strictly following the example query format."""
 
     user_prompt = f"""User Query: {user_query}
 

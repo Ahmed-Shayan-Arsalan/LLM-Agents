@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import AgentDetails from '@/components/AgentDetails'
 import { Agent } from '@/types/agent'
-import { getAgents, deleteAgent } from '@/services/api'
+import { getAgents, deleteAgent, verifyAuth } from '@/services/api'
 import toast from 'react-hot-toast'
 
 export default function Home() {
@@ -12,10 +13,30 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
   const [isCreating, setIsCreating] = useState(false)
+  const [checkingAuth, setCheckingAuth] = useState(true)
+  const router = useRouter()
 
   useEffect(() => {
-    fetchAgents()
-  }, [])
+    // Check authentication first
+    const checkAuth = async () => {
+      const token = localStorage.getItem('admin_token')
+      if (!token) {
+        router.push('/login')
+        return
+      }
+      
+      const isAuthenticated = await verifyAuth()
+      if (!isAuthenticated) {
+        localStorage.removeItem('admin_token')
+        router.push('/login')
+        return
+      }
+      
+      setCheckingAuth(false)
+      fetchAgents()
+    }
+    checkAuth()
+  }, [router])
 
   const fetchAgents = async () => {
     try {
@@ -87,6 +108,14 @@ export default function Home() {
       setIsCreating(false)
       setSelectedAgent(agents[0] || null)
     }
+  }
+
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen bg-[#343541] flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#10a37f]"></div>
+      </div>
+    )
   }
 
   return (

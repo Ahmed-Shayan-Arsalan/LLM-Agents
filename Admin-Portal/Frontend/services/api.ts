@@ -20,6 +20,27 @@ const api = axios.create({
   },
 })
 
+// Add token to requests if available
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('admin_token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+// Handle 401 errors (unauthorized)
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('admin_token')
+      window.location.href = '/login'
+    }
+    return Promise.reject(error)
+  }
+)
+
 export const getAgents = async (): Promise<Agent[]> => {
   const response = await api.get<Agent[]>('/api/agents')
   return response.data
@@ -42,5 +63,20 @@ export const updateAgent = async (agentId: string, agent: AgentUpdate): Promise<
 
 export const deleteAgent = async (agentId: string): Promise<void> => {
   await api.delete(`/api/agents/${agentId}`)
+}
+
+// Authentication functions
+export const login = async (password: string): Promise<{ success: boolean; token: string }> => {
+  const response = await api.post<{ success: boolean; message: string; token: string }>('/api/auth/login', { password })
+  return { success: response.data.success, token: response.data.token || '' }
+}
+
+export const verifyAuth = async (): Promise<boolean> => {
+  try {
+    await api.get('/api/auth/verify')
+    return true
+  } catch {
+    return false
+  }
 }
 

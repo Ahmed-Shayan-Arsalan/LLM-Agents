@@ -13,7 +13,7 @@ interface ChatInterfaceProps {
 }
 
 interface Message {
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: Date
 }
@@ -24,6 +24,7 @@ export default function ChatInterface({ agent, agents, onBack, onSwitchAgent }: 
   const [loading, setLoading] = useState(false)
   const [showAgentDropdown, setShowAgentDropdown] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const previousAgentIdRef = useRef<string | null>(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -32,6 +33,30 @@ export default function ChatInterface({ agent, agents, onBack, onSwitchAgent }: 
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  // Add system message when agent changes (but not on initial load)
+  useEffect(() => {
+    const currentAgentId = agent._id || null
+    
+    // Skip on initial load
+    if (previousAgentIdRef.current === null) {
+      previousAgentIdRef.current = currentAgentId
+      return
+    }
+    
+    // Only add system message if agent actually changed and we have messages
+    if (previousAgentIdRef.current !== currentAgentId && messages.length > 0) {
+      const systemMessage: Message = {
+        role: 'system',
+        content: `Switched to ${agent.name}`,
+        timestamp: new Date(),
+      }
+      setMessages((prev) => [...prev, systemMessage])
+    }
+    
+    // Update the ref
+    previousAgentIdRef.current = currentAgentId
+  }, [agent._id, agent.name, messages.length])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -109,19 +134,37 @@ export default function ChatInterface({ agent, agents, onBack, onSwitchAgent }: 
               </button>
               
               {showAgentDropdown && (
-                <div className="absolute top-full left-0 mt-2 bg-[#40414f] border border-gray-600 rounded-lg shadow-lg z-50 min-w-[200px] animate-slideDown">
+                <div className="absolute top-full left-0 mt-2 bg-[#40414f] border border-gray-600 rounded-lg shadow-lg z-50 min-w-[250px] animate-slideDown">
                   {agents.map((a) => (
                     <button
                       key={a._id}
                       onClick={() => {
+                        if (a._id === agent._id) {
+                          // Same agent, just close dropdown
+                          setShowAgentDropdown(false)
+                          return
+                        }
+                        // Switch agent (conversation history is preserved)
+                        toast.success(`Switched to ${a.name}`, {
+                          icon: '🤖',
+                          style: {
+                            background: '#10a37f',
+                            color: '#fff',
+                          },
+                        })
                         onSwitchAgent(a)
                         setShowAgentDropdown(false)
                       }}
-                      className={`w-full text-left px-4 py-2 hover:bg-[#4a4b5a] transition-colors first:rounded-t-lg last:rounded-b-lg ${
-                        a._id === agent._id ? 'bg-[#10a37f]/20 text-[#10a37f]' : 'text-white'
+                      className={`w-full text-left px-4 py-3 hover:bg-[#4a4b5a] transition-colors first:rounded-t-lg last:rounded-b-lg flex items-center justify-between ${
+                        a._id === agent._id ? 'bg-[#10a37f]/20 text-[#10a37f] font-semibold' : 'text-white'
                       }`}
                     >
-                      {a.name}
+                      <span>{a.name}</span>
+                      {a._id === agent._id && (
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -149,34 +192,52 @@ export default function ChatInterface({ agent, agents, onBack, onSwitchAgent }: 
             </div>
           ) : (
             <div className="space-y-6">
-              {messages.map((message, index) => (
-                <div
-                  key={index}
-                  className={`flex gap-4 animate-slideIn ${
-                    message.role === 'user' ? 'justify-end' : 'justify-start'
-                  }`}
-                >
-                  {message.role === 'assistant' && (
-                    <div className="w-8 h-8 bg-[#10a37f] rounded-full flex items-center justify-center flex-shrink-0">
-                      🤖
+              {messages.map((message, index) => {
+                // System message (bot switch indicator)
+                if (message.role === 'system') {
+                  return (
+                    <div key={index} className="flex items-center justify-center my-4 animate-fadeIn">
+                      <div className="flex items-center gap-3 px-4 py-2 bg-[#40414f]/50 border border-[#10a37f]/30 rounded-full">
+                        <div className="w-2 h-2 bg-[#10a37f] rounded-full animate-pulse"></div>
+                        <span className="text-sm text-gray-400 italic">
+                          {message.content} • {message.timestamp.toLocaleTimeString()}
+                        </span>
+                        <div className="w-2 h-2 bg-[#10a37f] rounded-full animate-pulse"></div>
+                      </div>
                     </div>
-                  )}
+                  )
+                }
+                
+                // User or Assistant message
+                return (
                   <div
-                    className={`max-w-[80%] rounded-lg px-4 py-3 ${
-                      message.role === 'user'
-                        ? 'bg-[#10a37f] text-white'
-                        : 'bg-[#40414f] text-gray-200'
+                    key={index}
+                    className={`flex gap-4 animate-slideIn ${
+                      message.role === 'user' ? 'justify-end' : 'justify-start'
                     }`}
                   >
-                    <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
-                  </div>
-                  {message.role === 'user' && (
-                    <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center flex-shrink-0">
-                      👤
+                    {message.role === 'assistant' && (
+                      <div className="w-8 h-8 bg-[#10a37f] rounded-full flex items-center justify-center flex-shrink-0">
+                        🤖
+                      </div>
+                    )}
+                    <div
+                      className={`max-w-[80%] rounded-lg px-4 py-3 ${
+                        message.role === 'user'
+                          ? 'bg-[#10a37f] text-white'
+                          : 'bg-[#40414f] text-gray-200'
+                      }`}
+                    >
+                      <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
                     </div>
-                  )}
-                </div>
-              ))}
+                    {message.role === 'user' && (
+                      <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center flex-shrink-0">
+                        👤
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
               {loading && (
                 <div className="flex gap-4 justify-start animate-fadeIn">
                   <div className="w-8 h-8 bg-[#10a37f] rounded-full flex items-center justify-center flex-shrink-0">
